@@ -14,38 +14,51 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file.Close()
+	lines := getLinesChannel(file)
+	for line := range lines {
+		fmt.Printf("read: %s\n", line)
+	}
+}
 
-	buffer := make([]byte, 8)
-	var currentLine string
+func getLinesChannel(f io.ReadCloser) <-chan string {
+	lines := make(chan string)
+	go func() {
+		defer close(lines)
+		defer f.Close()
 
-	for {
-		n, err := file.Read(buffer)
-		data := string(buffer[:n])
+		buffer := make([]byte, 8)
+		var currentLine string
 
-		if n > 0 {
-			parts := strings.Split(data, "\n")
-			for i, part := range parts {
-				if i == len(parts)-1 {
+		for {
+			n, err := f.Read(buffer)
+			data := string(buffer[:n])
+
+			if n > 0 {
+				parts := strings.Split(data, "\n")
+				for i, part := range parts {
+					if i == len(parts)-1 {
+						currentLine += part
+						break
+					}
 					currentLine += part
-					break
+					lines <- currentLine
+					currentLine = ""
 				}
-				currentLine += part
-				fmt.Printf("read: %s\n", currentLine)
-				currentLine = ""
+			}
+
+			if err == io.EOF {
+				break
+			}
+
+			if err != nil {
+				log.Fatal(err)
 			}
 		}
 
-		if err == io.EOF {
-			break
+		if currentLine != "" {
+			lines <- currentLine
 		}
+	}()
 
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	if currentLine != "" {
-		fmt.Printf("read: %s\n", currentLine)
-	}
+	return lines
 }
