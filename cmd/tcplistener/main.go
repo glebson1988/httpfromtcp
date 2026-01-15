@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
-	"strings"
+
+	"github.com/glebson1988/httpfromtcp/internal/request"
 )
 
 func main() {
@@ -22,53 +22,14 @@ func main() {
 		}
 
 		fmt.Println("connection accepted")
-		lines := getLinesChannel(conn)
-		for line := range lines {
-			fmt.Println(line)
+		req, err := request.RequestFromReader(conn)
+		if err != nil {
+			log.Fatal(err)
 		}
+		fmt.Println("Request line:")
+		fmt.Printf("- Method: %s\n", req.RequestLine.Method)
+		fmt.Printf("- Target: %s\n", req.RequestLine.RequestTarget)
+		fmt.Printf("- Version: %s\n", req.RequestLine.HttpVersion)
 		fmt.Println("connection closed")
 	}
-}
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	lines := make(chan string)
-	go func() {
-		defer close(lines)
-		defer f.Close()
-
-		buffer := make([]byte, 8)
-		var currentLine string
-
-		for {
-			n, err := f.Read(buffer)
-			data := string(buffer[:n])
-
-			if n > 0 {
-				parts := strings.Split(data, "\n")
-				for i, part := range parts {
-					if i == len(parts)-1 {
-						currentLine += part
-						break
-					}
-					currentLine += part
-					lines <- currentLine
-					currentLine = ""
-				}
-			}
-
-			if err == io.EOF {
-				break
-			}
-
-			if err != nil {
-				log.Fatal(err)
-			}
-		}
-
-		if currentLine != "" {
-			lines <- currentLine
-		}
-	}()
-
-	return lines
 }
