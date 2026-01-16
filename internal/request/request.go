@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/glebson1988/httpfromtcp/internal/headers"
 )
 
 type Request struct {
 	RequestLine RequestLine
+	Headers     headers.Headers
 	state       parserState
 }
 
@@ -21,8 +24,9 @@ type RequestLine struct {
 type parserState int
 
 const (
-	stateInitialized parserState = iota
-	stateDone
+	requestStateInitialized parserState = iota
+	requestStateParsingHeaders
+	requestStateDone
 )
 
 const bufferSize = 8
@@ -30,9 +34,9 @@ const bufferSize = 8
 func RequestFromReader(reader io.Reader) (*Request, error) {
 	buf := make([]byte, bufferSize, bufferSize)
 	readToIndex := 0
-	req := &Request{state: stateInitialized}
+	req := &Request{state: requestStateInitialized}
 
-	for req.state != stateDone {
+	for req.state != requestStateDone {
 		if readToIndex == len(buf) {
 			newBuf := make([]byte, len(buf)*2)
 			copy(newBuf, buf[:readToIndex])
@@ -56,7 +60,9 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		}
 
 		if err == io.EOF {
-			req.state = stateDone
+			if req.state != requestStateDone {
+				return nil, fmt.Errorf("unexpected EOF")
+			}
 			break
 		}
 	}
@@ -98,8 +104,23 @@ func parseRequestLine(data []byte) (RequestLine, int, error) {
 }
 
 func (r *Request) parse(data []byte) (int, error) {
+	totalBytesParsed := 0
+	for r.state != requestStateDone {
+		n, err := r.parseSingle(data[totalBytesParsed:])
+		if err != nil {
+			return totalBytesParsed, err
+		}
+		if n == 0 {
+			return totalBytesParsed, nil
+		}
+		totalBytesParsed += n
+	}
+	return totalBytesParsed, nil
+}
+
+func (r *Request) parseSingle(data []byte) (int, error) {
 	switch r.state {
-	case stateInitialized:
+	case requestStateInitialized:
 		reqLine, consumed, err := parseRequestLine(data)
 		if err != nil {
 			return 0, err
@@ -108,9 +129,24 @@ func (r *Request) parse(data []byte) (int, error) {
 			return 0, nil
 		}
 		r.RequestLine = reqLine
-		r.state = stateDone
+		r.state = requestStateParsingHeaders
 		return consumed, nil
-	case stateDone:
+	case requestStateParsingHeaders:
+		if r.Headers == nil {
+			r.Headers = headers.Headers{}
+		}
+		consumed, done, err := r.Headers.Parse(data)
+		if err != nil {
+			return 0, err
+		}
+		if consumed == 0 {
+			return 0, nil
+		}
+		if done {
+			r.state = requestStateDone
+		}
+		return consumed, nil
+	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:
 		return 0, fmt.Errorf("error: unknown state")
