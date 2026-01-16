@@ -36,7 +36,32 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	if key == "" {
 		return 0, false, fmt.Errorf("invalid header key: %s", keyPart)
 	}
+	if !isValidFieldName(key) {
+		return 0, false, fmt.Errorf("invalid header key: %s", keyPart)
+	}
 
-	h[key] = value
+	h[strings.ToLower(key)] = value
 	return lineEnd + len(emptyLine), false, nil
+}
+
+func isValidFieldName(key string) bool {
+	for i := 0; i < len(key); i++ {
+		ch := key[i]
+		if ch >= 'a' && ch <= 'z' {
+			continue
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			continue
+		}
+		if ch >= '0' && ch <= '9' {
+			continue
+		}
+		switch ch {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
