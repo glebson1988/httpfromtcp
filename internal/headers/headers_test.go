@@ -65,6 +65,16 @@ func TestHeadersParse(t *testing.T) {
 		assert.Equal(t, "test", h["user-agent"])
 	})
 
+	t.Run("Valid header with existing key in map", func(t *testing.T) {
+		h := Headers{"set-person": "lane-loves-go"}
+
+		n, done, err := h.Parse([]byte("Set-Person: prime-loves-zig\r\n"))
+		require.NoError(t, err)
+		assert.False(t, done)
+		assert.Equal(t, len("Set-Person: prime-loves-zig\r\n"), n)
+		assert.Equal(t, "lane-loves-go, prime-loves-zig", h["set-person"])
+	})
+
 	t.Run("Valid done", func(t *testing.T) {
 		h := Headers{}
 		n, done, err := h.Parse([]byte("\r\n"))

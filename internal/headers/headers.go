@@ -40,7 +40,12 @@ func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 		return 0, false, fmt.Errorf("invalid header key: %s", keyPart)
 	}
 
-	h[strings.ToLower(key)] = value
+	lowerKey := strings.ToLower(key)
+	if existing, ok := h[lowerKey]; ok {
+		h[lowerKey] = existing + ", " + value
+	} else {
+		h[lowerKey] = value
+	}
 	return lineEnd + len(emptyLine), false, nil
 }
 
