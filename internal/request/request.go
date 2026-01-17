@@ -13,6 +13,7 @@ type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
 	state       parserState
+	Body        []byte
 }
 
 type RequestLine struct {
@@ -26,6 +27,7 @@ type parserState int
 const (
 	requestStateInitialized parserState = iota
 	requestStateParsingHeaders
+	requestStateParsingBody
 	requestStateDone
 )
 
@@ -143,9 +145,34 @@ func (r *Request) parseSingle(data []byte) (int, error) {
 			return 0, nil
 		}
 		if done {
-			r.state = requestStateDone
+			r.state = requestStateParsingBody
 		}
 		return consumed, nil
+	case requestStateParsingBody:
+		contentLengthStr := r.Headers.Get("content-length")
+		if contentLengthStr == "" {
+			r.state = requestStateDone
+			return len(data), nil
+		}
+
+		var contentLength int
+		_, err := fmt.Sscanf(contentLengthStr, "%d", &contentLength)
+		if err != nil {
+			return 0, fmt.Errorf("invalid Content-Length: %s", contentLengthStr)
+		}
+
+		toRead := len(data)
+		remaining := contentLength - len(r.Body)
+		if toRead > remaining {
+			toRead = remaining
+		}
+
+		r.Body = append(r.Body, data[:toRead]...)
+
+		if len(r.Body) == contentLength {
+			r.state = requestStateDone
+		}
+		return toRead, nil
 	case requestStateDone:
 		return 0, fmt.Errorf("error: trying to read data in a done state")
 	default:

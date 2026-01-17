@@ -10,6 +10,10 @@ type Headers map[string]string
 
 const emptyLine = "\r\n"
 
+func (h Headers) Get(key string) string {
+	return h[strings.ToLower(key)]
+}
+
 func (h Headers) Parse(data []byte) (n int, done bool, err error) {
 	lineEnd := bytes.Index(data, []byte(emptyLine))
 	if lineEnd == -1 {
