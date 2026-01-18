@@ -1,16 +1,45 @@
 package server
 
 import (
+	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebson1988/httpfromtcp/internal/request"
+	"github.com/glebson1988/httpfromtcp/internal/response"
 )
 
 func TestServer(t *testing.T) {
-	t.Run("Serve writes response", func(t *testing.T) {
-		srv, err := Serve(0)
+	handler := func(w io.Writer, req *request.Request) *HandlerError {
+		switch req.RequestLine.RequestTarget {
+		case "/yourproblem":
+			return &HandlerError{
+				StatusCode: response.StatusBadRequest,
+				Message:    "Your problem is not my problem\n",
+			}
+		case "/myproblem":
+			return &HandlerError{
+				StatusCode: response.StatusInternalServerError,
+				Message:    "Woopsie, my bad\n",
+			}
+		default:
+			_, err := io.WriteString(w, "All good, frfr\n")
+			if err != nil {
+				return &HandlerError{
+					StatusCode: response.StatusInternalServerError,
+					Message:    "Woopsie, my bad\n",
+				}
+			}
+			return nil
+		}
+	}
+
+	t.Run("Serve writes success response", func(t *testing.T) {
+		srv, err := Serve(0, handler)
 		if err != nil {
 			t.Fatalf("Serve returned error: %v", err)
 		}
@@ -18,39 +47,15 @@ func TestServer(t *testing.T) {
 			_ = srv.Close()
 		})
 
-		addr := srv.listener.Addr().String()
-		conn, err := net.Dial("tcp", addr)
-		if err != nil {
-			t.Fatalf("Dial returned error: %v", err)
+		statusLine, headers, body := sendRequest(t, srv.listener.Addr().String(), "/")
+		if statusLine != "HTTP/1.1 200 OK" {
+			t.Fatalf("unexpected status line: %q", statusLine)
 		}
-		defer conn.Close()
-
-		data, err := io.ReadAll(conn)
-		if err != nil {
-			t.Fatalf("ReadAll returned error: %v", err)
+		if body != "All good, frfr\n" {
+			t.Fatalf("unexpected body: %q", body)
 		}
 
-		lines := strings.Split(string(data), "\r\n")
-		if len(lines) < 2 {
-			t.Fatalf("unexpected response: %q", string(data))
-		}
-		if lines[0] != "HTTP/1.1 200 OK" {
-			t.Fatalf("unexpected status line: %q", lines[0])
-		}
-
-		headers := make(map[string]string)
-		for _, line := range lines[1:] {
-			if line == "" {
-				break
-			}
-			parts := strings.SplitN(line, ": ", 2)
-			if len(parts) != 2 {
-				t.Fatalf("invalid header line: %q", line)
-			}
-			headers[strings.ToLower(parts[0])] = parts[1]
-		}
-
-		if headers["content-length"] != "0" {
+		if headers["content-length"] != strconv.Itoa(len(body)) {
 			t.Fatalf("unexpected Content-Length: %q", headers["content-length"])
 		}
 		if headers["connection"] != "close" {
@@ -61,8 +66,40 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("Serve writes handler error responses", func(t *testing.T) {
+		srv, err := Serve(0, handler)
+		if err != nil {
+			t.Fatalf("Serve returned error: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = srv.Close()
+		})
+
+		statusLine, headers, body := sendRequest(t, srv.listener.Addr().String(), "/yourproblem")
+		if statusLine != "HTTP/1.1 400 Bad Request" {
+			t.Fatalf("unexpected status line: %q", statusLine)
+		}
+		if body != "Your problem is not my problem\n" {
+			t.Fatalf("unexpected body: %q", body)
+		}
+		if headers["content-length"] != strconv.Itoa(len(body)) {
+			t.Fatalf("unexpected Content-Length: %q", headers["content-length"])
+		}
+
+		statusLine, headers, body = sendRequest(t, srv.listener.Addr().String(), "/myproblem")
+		if statusLine != "HTTP/1.1 500 Internal Server Error" {
+			t.Fatalf("unexpected status line: %q", statusLine)
+		}
+		if body != "Woopsie, my bad\n" {
+			t.Fatalf("unexpected body: %q", body)
+		}
+		if headers["content-length"] != strconv.Itoa(len(body)) {
+			t.Fatalf("unexpected Content-Length: %q", headers["content-length"])
+		}
+	})
+
 	t.Run("Close stops accepting", func(t *testing.T) {
-		srv, err := Serve(0)
+		srv, err := Serve(0, handler)
 		if err != nil {
 			t.Fatalf("Serve returned error: %v", err)
 		}
@@ -82,4 +119,48 @@ func TestServer(t *testing.T) {
 			t.Fatalf("expected dial to fail after Close")
 		}
 	})
+}
+
+func sendRequest(t *testing.T, addr, path string) (string, map[string]string, string) {
+	t.Helper()
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer conn.Close()
+
+	req := fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", path, addr)
+	if _, err := io.WriteString(conn, req); err != nil {
+		t.Fatalf("WriteString returned error: %v", err)
+	}
+
+	data, err := io.ReadAll(conn)
+	if err != nil {
+		t.Fatalf("ReadAll returned error: %v", err)
+	}
+
+	parts := strings.SplitN(string(data), "\r\n\r\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("unexpected response: %q", string(data))
+	}
+
+	lines := strings.Split(parts[0], "\r\n")
+	if len(lines) == 0 {
+		t.Fatalf("missing status line: %q", string(data))
+	}
+
+	headers := make(map[string]string)
+	for _, line := range lines[1:] {
+		if line == "" {
+			continue
+		}
+		kv := strings.SplitN(line, ": ", 2)
+		if len(kv) != 2 {
+			t.Fatalf("invalid header line: %q", line)
+		}
+		headers[strings.ToLower(kv[0])] = kv[1]
+	}
+
+	return lines[0], headers, parts[1]
 }
