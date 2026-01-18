@@ -14,28 +14,30 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	handler := func(w io.Writer, req *request.Request) *HandlerError {
+	handler := func(w *response.Writer, req *request.Request) {
+		var statusCode response.StatusCode
+		var body string
 		switch req.RequestLine.RequestTarget {
 		case "/yourproblem":
-			return &HandlerError{
-				StatusCode: response.StatusBadRequest,
-				Message:    "Your problem is not my problem\n",
-			}
+			statusCode = response.StatusBadRequest
+			body = "Your problem is not my problem\n"
 		case "/myproblem":
-			return &HandlerError{
-				StatusCode: response.StatusInternalServerError,
-				Message:    "Woopsie, my bad\n",
-			}
+			statusCode = response.StatusInternalServerError
+			body = "Woopsie, my bad\n"
 		default:
-			_, err := io.WriteString(w, "All good, frfr\n")
-			if err != nil {
-				return &HandlerError{
-					StatusCode: response.StatusInternalServerError,
-					Message:    "Woopsie, my bad\n",
-				}
-			}
-			return nil
+			statusCode = response.StatusOK
+			body = "All good, frfr\n"
 		}
+
+		bodyBytes := []byte(body)
+		headers := response.GetDefaultHeaders(len(bodyBytes))
+		if err := w.WriteStatusLine(statusCode); err != nil {
+			return
+		}
+		if err := w.WriteHeaders(headers); err != nil {
+			return
+		}
+		_, _ = w.WriteBody(bodyBytes)
 	}
 
 	t.Run("Serve writes success response", func(t *testing.T) {
