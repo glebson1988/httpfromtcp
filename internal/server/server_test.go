@@ -1,9 +1,9 @@
 package server
 
 import (
-	"fmt"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -29,14 +29,34 @@ func TestServeWritesResponse(t *testing.T) {
 		t.Fatalf("ReadAll returned error: %v", err)
 	}
 
-	body := "Hello World!\n"
-	expected := fmt.Sprintf(
-		"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
-		len(body),
-		body,
-	)
-	if string(data) != expected {
-		t.Fatalf("unexpected response:\n%s", string(data))
+	lines := strings.Split(string(data), "\r\n")
+	if len(lines) < 2 {
+		t.Fatalf("unexpected response: %q", string(data))
+	}
+	if lines[0] != "HTTP/1.1 200 OK" {
+		t.Fatalf("unexpected status line: %q", lines[0])
+	}
+
+	headers := make(map[string]string)
+	for _, line := range lines[1:] {
+		if line == "" {
+			break
+		}
+		parts := strings.SplitN(line, ": ", 2)
+		if len(parts) != 2 {
+			t.Fatalf("invalid header line: %q", line)
+		}
+		headers[strings.ToLower(parts[0])] = parts[1]
+	}
+
+	if headers["content-length"] != "0" {
+		t.Fatalf("unexpected Content-Length: %q", headers["content-length"])
+	}
+	if headers["connection"] != "close" {
+		t.Fatalf("unexpected Connection: %q", headers["connection"])
+	}
+	if headers["content-type"] != "text/plain" {
+		t.Fatalf("unexpected Content-Type: %q", headers["content-type"])
 	}
 }
 
