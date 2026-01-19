@@ -1,9 +1,12 @@
 package main
 
 import (
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/glebson1988/httpfromtcp/internal/request"
@@ -14,7 +17,73 @@ import (
 const port = 42069
 
 func main() {
-	handler := func(w *response.Writer, req *request.Request) {
+	handler := newHandler()
+	srv, err := server.Serve(port, handler)
+	if err != nil {
+		log.Fatalf("Error starting server: %v", err)
+	}
+	defer srv.Close()
+	log.Println("Server started on port", port)
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+	log.Println("Server gracefully stopped")
+}
+
+func newHandler() func(w *response.Writer, req *request.Request) {
+	return func(w *response.Writer, req *request.Request) {
+		if strings.HasPrefix(req.RequestLine.RequestTarget, "/httpbin/") {
+			targetPath := strings.TrimPrefix(req.RequestLine.RequestTarget, "/httpbin")
+			resp, err := http.Get("https://httpbin.org" + targetPath)
+			if err != nil {
+				body := []byte("failed to reach upstream")
+				headers := response.GetDefaultHeaders(len(body))
+				if err := w.WriteStatusLine(response.StatusInternalServerError); err != nil {
+					return
+				}
+				if err := w.WriteHeaders(headers); err != nil {
+					return
+				}
+				_, _ = w.WriteBody(body)
+				return
+			}
+			defer resp.Body.Close()
+
+			headers := make(response.Headers)
+			for key, values := range resp.Header {
+				headers.Set(key, strings.Join(values, ", "))
+			}
+			delete(headers, "content-length")
+			headers.Set("Transfer-Encoding", "chunked")
+
+			if err := w.WriteStatusLine(response.StatusCode(resp.StatusCode)); err != nil {
+				return
+			}
+			if err := w.WriteHeaders(headers); err != nil {
+				return
+			}
+
+			buf := make([]byte, 1024)
+			for {
+				n, err := resp.Body.Read(buf)
+				log.Println(n)
+				if n > 0 {
+					if _, err := w.WriteChunkedBody(buf[:n]); err != nil {
+						return
+					}
+				}
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return
+				}
+			}
+			_, _ = w.WriteChunkedBodyDone()
+			return
+		}
+
 		var statusCode response.StatusCode
 		var body string
 		switch req.RequestLine.RequestTarget {
@@ -68,16 +137,4 @@ func main() {
 		}
 		_, _ = w.WriteBody(bodyBytes)
 	}
-
-	srv, err := server.Serve(port, handler)
-	if err != nil {
-		log.Fatalf("Error starting server: %v", err)
-	}
-	defer srv.Close()
-	log.Println("Server started on port", port)
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
-	log.Println("Server gracefully stopped")
 }

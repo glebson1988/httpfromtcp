@@ -119,3 +119,35 @@ func WriteHeaders(w io.Writer, headers Headers) error {
 	}
 	return nil
 }
+
+func (w *Writer) WriteChunkedBody(p []byte) (int, error) {
+	if w.state != writerStateBody {
+		return 0, fmt.Errorf("body must be written after status line and headers")
+	}
+	sizeLine := fmt.Sprintf("%x\r\n", len(p))
+	_, err := io.WriteString(w.writer, sizeLine)
+	if err != nil {
+		return 0, err
+	}
+	n, err := w.writer.Write(p)
+	if err != nil {
+		return n, err
+	}
+	_, err = io.WriteString(w.writer, "\r\n")
+	if err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+func (w *Writer) WriteChunkedBodyDone() (int, error) {
+	if w.state != writerStateBody {
+		return 0, fmt.Errorf("body must be written after status line and headers")
+	}
+	n, err := io.WriteString(w.writer, "0\r\n\r\n")
+	if err != nil {
+		return n, err
+	}
+	w.state = writerStateDone
+	return n, nil
+}
