@@ -43,6 +43,38 @@ func TestChunkedBodyWrites(t *testing.T) {
 		}
 	})
 
+	t.Run("writes trailers after chunks", func(t *testing.T) {
+		var buf bytes.Buffer
+		writer := NewWriter(&buf)
+		if err := writer.WriteStatusLine(StatusOK); err != nil {
+			t.Fatalf("WriteStatusLine error: %v", err)
+		}
+		if err := writer.WriteHeaders(Headers{"transfer-encoding": "chunked"}); err != nil {
+			t.Fatalf("WriteHeaders error: %v", err)
+		}
+		if _, err := writer.WriteChunkedBody([]byte("hello")); err != nil {
+			t.Fatalf("WriteChunkedBody error: %v", err)
+		}
+
+		trailers := Headers{
+			"x-content-sha256": "deadbeef",
+			"x-content-length": "5",
+		}
+		if err := writer.WriteTrailers(trailers); err != nil {
+			t.Fatalf("WriteTrailers error: %v", err)
+		}
+
+		parts := strings.SplitN(buf.String(), "\r\n\r\n", 2)
+		if len(parts) != 2 {
+			t.Fatalf("missing header separator")
+		}
+		body := parts[1]
+		if !strings.Contains(body, "0\r\nx-content-length: 5\r\nx-content-sha256: deadbeef\r\n\r\n") &&
+			!strings.Contains(body, "0\r\nx-content-sha256: deadbeef\r\nx-content-length: 5\r\n\r\n") {
+			t.Fatalf("unexpected trailer block: %q", body)
+		}
+	})
+
 	t.Run("requires body state", func(t *testing.T) {
 		var buf bytes.Buffer
 		writer := NewWriter(&buf)

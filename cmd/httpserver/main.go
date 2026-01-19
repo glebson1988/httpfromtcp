@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -56,6 +58,7 @@ func newHandler() func(w *response.Writer, req *request.Request) {
 			}
 			delete(headers, "content-length")
 			headers.Set("Transfer-Encoding", "chunked")
+			headers.Set("Trailer", "X-Content-SHA256, X-Content-Length")
 
 			if err := w.WriteStatusLine(response.StatusCode(resp.StatusCode)); err != nil {
 				return
@@ -65,10 +68,12 @@ func newHandler() func(w *response.Writer, req *request.Request) {
 			}
 
 			buf := make([]byte, 1024)
+			var fullBody []byte
 			for {
 				n, err := resp.Body.Read(buf)
 				log.Println(n)
 				if n > 0 {
+					fullBody = append(fullBody, buf[:n]...)
 					if _, err := w.WriteChunkedBody(buf[:n]); err != nil {
 						return
 					}
@@ -80,7 +85,11 @@ func newHandler() func(w *response.Writer, req *request.Request) {
 					return
 				}
 			}
-			_, _ = w.WriteChunkedBodyDone()
+			sum := sha256.Sum256(fullBody)
+			trailers := make(response.Headers)
+			trailers.Set("X-Content-SHA256", fmt.Sprintf("%x", sum))
+			trailers.Set("X-Content-Length", fmt.Sprintf("%d", len(fullBody)))
+			_ = w.WriteTrailers(trailers)
 			return
 		}
 

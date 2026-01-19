@@ -151,3 +151,17 @@ func (w *Writer) WriteChunkedBodyDone() (int, error) {
 	w.state = writerStateDone
 	return n, nil
 }
+
+func (w *Writer) WriteTrailers(h Headers) error {
+	if w.state != writerStateBody {
+		return fmt.Errorf("body must be written after status line and headers")
+	}
+	if _, err := io.WriteString(w.writer, "0\r\n"); err != nil {
+		return err
+	}
+	if err := WriteHeaders(w.writer, h); err != nil {
+		return err
+	}
+	w.state = writerStateDone
+	return nil
+}

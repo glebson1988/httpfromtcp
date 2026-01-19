@@ -154,7 +154,14 @@ func parseChunkedBody(t *testing.T, data []byte) ([]int, []byte) {
 		size := int(size64)
 		data = data[lineEnd+2:]
 		if size == 0 {
-			if len(data) < 2 || string(data[:2]) != "\r\n" {
+			if len(data) < 2 {
+				t.Fatalf("missing chunked terminator")
+			}
+			if string(data[:2]) == "\r\n" {
+				return sizes, payload
+			}
+			trailerEnd := bytes.Index(data, []byte("\r\n\r\n"))
+			if trailerEnd == -1 {
 				t.Fatalf("missing chunked terminator")
 			}
 			return sizes, payload
