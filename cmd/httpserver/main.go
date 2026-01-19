@@ -96,6 +96,23 @@ func newHandler() func(w *response.Writer, req *request.Request) {
 		var statusCode response.StatusCode
 		var body string
 		switch req.RequestLine.RequestTarget {
+		case "/video":
+			videoBytes, err := os.ReadFile("assets/vim.mp4")
+			if err != nil {
+				statusCode = response.StatusInternalServerError
+				body = "failed to read video"
+				break
+			}
+			headers := response.GetDefaultHeaders(len(videoBytes))
+			headers.Set("Content-Type", "video/mp4")
+			if err := w.WriteStatusLine(response.StatusOK); err != nil {
+				return
+			}
+			if err := w.WriteHeaders(headers); err != nil {
+				return
+			}
+			_, _ = w.WriteBody(videoBytes)
+			return
 		case "/yourproblem":
 			statusCode = response.StatusBadRequest
 			body = `<html>
