@@ -1,6 +1,6 @@
 # httpfromtcp
 
-A tiny HTTP/1.1 server built from raw TCP primitives. It includes a minimal request parser and response writer, plus a small demo app that proxies httpbin and serves a local video file.
+HTTP/1.1 server built from raw TCP primitives. It includes a minimal request parser and response writer, plus a small demo app that proxies httpbin and serves a local video file.
 
 ## What we implemented
 
